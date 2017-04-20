@@ -170,6 +170,9 @@ static int f2fs_prepare_super_block(void)
 #ifdef F2FS_DEDUPE
 	u_int32_t dedupe_bitmap_size;
 #endif
+#ifdef F2FS_SUM_TABLE
+	u_int32_t sum_table_bitmap_size;
+#endif
 	u_int32_t total_zones;
 
 	set_sb(magic, F2FS_SUPER_MAGIC);
@@ -261,6 +264,10 @@ static int f2fs_prepare_super_block(void)
 	dedupe_bitmap_size = get_sb(segment_count_dedupe)/2*(1024/4)/8;
 #endif
 
+#ifdef F2FS_SUM_TABLE
+	set_sb(segment_count_sum_table,12);
+	sum_table_bitmap_size = get_sb(segment_count_sum_table)/2*(1024/4)/8;
+#endif 
 	/*
 	 * It should be reserved minimum 1 segment for nat.
 	 * When sit is too large, we should expand cp area. It requires more pages for cp.
@@ -268,6 +275,9 @@ static int f2fs_prepare_super_block(void)
 	if (max_sit_bitmap_size
 #ifdef F2FS_DEDUPE
 		+ dedupe_bitmap_size
+#endif
+#ifdef F2FS_SUM_TABLE
+		+ sum_table_bitmap_size
 #endif
 		>(CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 65)) {
 		max_nat_bitmap_size = CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1;
@@ -277,6 +287,9 @@ static int f2fs_prepare_super_block(void)
 		max_nat_bitmap_size = CHECKSUM_OFFSET - sizeof(struct f2fs_checkpoint) + 1 - max_sit_bitmap_size
 #ifdef F2FS_DEDUPE
 		- dedupe_bitmap_size
+#endif
+#ifdef F2FS_SUM_TABLE
+		- sum_table_bitmap_size
 #endif
 		;
 		sb.cp_payload = 0;
@@ -297,12 +310,20 @@ static int f2fs_prepare_super_block(void)
 	set_sb(ssa_blkaddr, get_sb(nat_blkaddr) + get_sb(segment_count_nat) * config.blks_per_seg);
 #endif
 
+#ifdef F2FS_SUM_TABLE
+	set_sb(sum_table_blkaddr, get_sb(ssa_blkaddr));
+	set_sb(ssa_blkaddr, get_sb(sum_table_blkaddr) + get_sb(segment_count_sum_table) * config.blks_per_seg);
+#endif
+
 	total_valid_blks_available = (get_sb(segment_count) -
 			(get_sb(segment_count_ckpt) +
 			get_sb(segment_count_sit) +
 			get_sb(segment_count_nat)
 #ifdef F2FS_DEDUPE
 			+get_sb(segment_count_dedupe)
+#endif
+#ifdef F2FS_SUM_TABLE
+			+get_sb(segment_count_sum_table)
 #endif
 			)) *
 			config.blks_per_seg;
@@ -317,6 +338,9 @@ static int f2fs_prepare_super_block(void)
 		get_sb(segment_count_nat) +
 #ifdef F2FS_DEDUPE
 		get_sb(segment_count_dedupe) +
+#endif
+#ifdef F2FS_SUM_TABLE
+		get_sb(segment_count_sum_table)+
 #endif
 		get_sb(segment_count_ssa);
 	diff = total_meta_segments % (config.segs_per_zone);
@@ -333,6 +357,9 @@ static int f2fs_prepare_super_block(void)
 			 get_sb(segment_count_nat) +
 #ifdef F2FS_DEDUPE
 			 get_sb(segment_count_dedupe) +
+#endif
+#ifdef F2FS_SUM_TABLE
+			 get_sb(segment_count_sum_table)+
 #endif
 			 get_sb(segment_count_ssa)));
 
@@ -451,7 +478,7 @@ static int f2fs_init_nat_area(void)
 	nat_seg_addr *= blk_size;
 
 	DBG(1, "\tFilling nat area at offset 0x%08"PRIx64"\n", nat_seg_addr);
-	for (index = 0; index < get_sb(segment_count_nat) / 2; index++) {
+	for (index = 0; index < (get_sb(segment_count_nat) / 2); index++) {
 		if (dev_fill(nat_buf, nat_seg_addr, seg_size)) {
 			MSG(1, "\tError: While zeroing out the nat area \
 					on disk!!!\n");
@@ -486,7 +513,7 @@ static int f2fs_init_dedupe_area(void)
 	dedupe_seg_addr *= blk_size;
 
 	DBG(1, "\tFilling dedupe area at offset 0x%08"PRIx64"\n", dedupe_seg_addr);
-	for (index = 0; index < get_sb(segment_count_dedupe); index++) {
+	for (index = 0; index < (get_sb(segment_count_dedupe)/2); index++) {
 		if (dev_fill(zero_buf, dedupe_seg_addr, seg_size)) {
 			MSG(1, "\tError: While zeroing out the dedupe area \
 					on disk!!!\n");
@@ -497,6 +524,65 @@ static int f2fs_init_dedupe_area(void)
 	}
 
 	free(zero_buf);
+	return 0 ;
+}
+#endif
+
+#ifdef F2FS_SUM_TABLE
+static int f2fs_init_sum_table_area(void)
+{
+	u_int32_t blk_size, seg_size;
+	u_int32_t index = 0,blk_cnt,cnt=0,j;
+	u_int64_t sum_table_seg_addr = 0, sum_table_seg_addr1=0;
+	struct sum_table_block *sum_table_buf;
+	
+	blk_size = 1 << get_sb(log_blocksize);
+	seg_size = (1 << get_sb(log_blocks_per_seg)) * blk_size;
+
+	sum_table_buf = calloc(sizeof(u_int8_t), blk_size);
+	if(sum_table_buf == NULL) {
+		MSG(1, "\tError: Calloc Failed for dedupe_zero_buf!!!\n");
+		return -1;
+	}
+
+	sum_table_seg_addr = get_sb(sum_table_blkaddr);
+	sum_table_seg_addr *= blk_size;
+	sum_table_seg_addr1 =sum_table_seg_addr + 3*seg_size;
+	
+	MSG(0,"sum_table_seg_addr %d\n",sum_table_seg_addr);
+	DBG(1, "\tFilling dedupe area at offset 0x%08"PRIx64"\n", sum_table_seg_addr);
+
+	blk_cnt =  (get_sb(segment_count_sum_table)/4)<<get_sb(log_blocks_per_seg);
+	MSG(0,"1 blk cnt %d blk size %d seg_size %d\n",blk_cnt,blk_size,seg_size);
+	
+	for (index = 0; index < blk_cnt; index++) {
+		memset(sum_table_buf,0,blk_size);
+		
+		for(j=0;j<SUM_TABLE_PER_BLOCK;j++)
+		{
+			cnt++;
+			sum_table_buf->sum_table[j].next = cpu_to_le32(cnt);
+		}
+		
+		
+		if (dev_write(sum_table_buf, sum_table_seg_addr, blk_size)) {
+			MSG(1, "\tError: While zeroing out the dedupe area \
+					on disk!!!\n");
+			free(sum_table_buf);
+			return -1;
+		}
+		if (dev_write(sum_table_buf, sum_table_seg_addr1, blk_size)) {
+			MSG(1, "\tError: While zeroing out the dedupe area \
+					on disk!!!\n");
+			free(sum_table_buf);
+			return -1;
+		}
+		
+		sum_table_seg_addr += blk_size;
+		sum_table_seg_addr1 += blk_size;
+	}
+
+	free(sum_table_buf);
 	return 0 ;
 }
 #endif
@@ -1011,6 +1097,15 @@ int f2fs_format_device(void)
 		goto exit;
 	}
 #endif
+
+#ifdef F2FS_SUM_TABLE
+		err = f2fs_init_sum_table_area();
+		if (err < 0) {
+			MSG(0, "\tError: Failed to Initialise the GC DEDUPE AREA!!!\n");
+			goto exit;
+		}
+#endif
+
 
 	err = f2fs_create_root_dir();
 	if (err < 0) {

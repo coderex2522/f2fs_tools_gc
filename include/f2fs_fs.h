@@ -20,7 +20,10 @@
 #include <config.h>
 #endif
 
+
 #define F2FS_DEDUPE 1
+#define F2FS_SUM_TABLE 1
+#define SUM_TABLE_PER_BLOCK PAGE_CACHE_SIZE/sizeof(struct summary_table_entry)
 
 typedef u_int64_t	u64;
 typedef u_int32_t	u32;
@@ -225,6 +228,20 @@ enum f2fs_config_func {
 	DUMP,
 };
 
+#ifdef F2FS_SUM_TABLE
+struct summary_table_entry
+{	
+	__le32 nid;
+	__le16 ofs_in_node;
+	__le32 next;
+}__attribute__((packed));
+
+struct sum_table_block{
+	struct summary_table_entry sum_table[SUM_TABLE_PER_BLOCK];
+	__u8 reserved[6];
+}__attribute__((packed));
+#endif
+
 struct f2fs_configuration {
 	u_int32_t sector_size;
 	u_int32_t reserved_segments;
@@ -359,6 +376,10 @@ struct f2fs_super_block {
 	__u8 reserved[21];
 	__le32 segment_count_dedupe;	/* # of segments for Dedupe */
  	__le32 dedupe_blkaddr;		/* start block address of Dedupe */
+#endif
+#ifdef F2FS_SUM_TABLE
+	__le32 segment_count_sum_table;
+	__le32 sum_table_blkaddr;
 #endif
 } __attribute__((packed));
 
