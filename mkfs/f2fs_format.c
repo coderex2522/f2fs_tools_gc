@@ -541,19 +541,23 @@ static int f2fs_init_sum_table_area(void)
 
 	sum_table_buf = calloc(sizeof(u_int8_t), blk_size);
 	if(sum_table_buf == NULL) {
-		MSG(1, "\tError: Calloc Failed for dedupe_zero_buf!!!\n");
+		MSG(1, "\tError: Calloc Failed for sum table buf!!!\n");
 		return -1;
 	}
 
 	sum_table_seg_addr = get_sb(sum_table_blkaddr);
 	sum_table_seg_addr *= blk_size;
 	sum_table_seg_addr1 =sum_table_seg_addr + 3*seg_size;
+	/*-----------------------6 segment----------------------
+	|---------3 seg------------|-------------3 seg----------|
+	|---sum_table_seg_addr-----|-----sum_table_seg_addr1----|
+	--------------------------------------------------------
+	*/
 	
-	MSG(0,"sum_table_seg_addr %d\n",sum_table_seg_addr);
-	DBG(1, "\tFilling dedupe area at offset 0x%08"PRIx64"\n", sum_table_seg_addr);
+	DBG(1, "\tFilling sum table area at offset 0x%08"PRIx64"\n", sum_table_seg_addr);
 
 	blk_cnt =  (get_sb(segment_count_sum_table)/4)<<get_sb(log_blocks_per_seg);
-	MSG(0,"1 blk cnt %d blk size %d seg_size %d\n",blk_cnt,blk_size,seg_size);
+	
 	
 	for (index = 0; index < blk_cnt; index++) {
 		memset(sum_table_buf,0,blk_size);
@@ -566,13 +570,13 @@ static int f2fs_init_sum_table_area(void)
 		
 		
 		if (dev_write(sum_table_buf, sum_table_seg_addr, blk_size)) {
-			MSG(1, "\tError: While zeroing out the dedupe area \
+			MSG(1, "\tError: While mkfs out the sum table area \
 					on disk!!!\n");
 			free(sum_table_buf);
 			return -1;
 		}
 		if (dev_write(sum_table_buf, sum_table_seg_addr1, blk_size)) {
-			MSG(1, "\tError: While zeroing out the dedupe area \
+			MSG(1, "\tError: While mkfs out the sum table area \
 					on disk!!!\n");
 			free(sum_table_buf);
 			return -1;
